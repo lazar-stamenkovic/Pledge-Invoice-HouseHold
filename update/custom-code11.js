@@ -58,66 +58,89 @@ exports.main = async (event, callback) => {
   const dealId = event.inputFields['hs_object_id'];
   const line_item_id = event.inputFields['line_item_id'];
   const ns_line_item_id = event.inputFields['ns_line_item_id'];
+  const accessToken = process.env.accessToken;
+
   if (!ns_line_item_id) {
     return callback({
       outputFields: {
+        invoice_successfully_created: 'no',
         notification: 'Failed to create the invoice'
       }
     })
   }
-  // Get Invoice Detail
-  const ns_path = `invoice/${li_netsuite_internal_id}`;
-  const AuthorizationHeader = ns_auth('GET', ns_path);
-  const ns_invoice_options = {
-    'method': 'GET',
-    'url': `https://4147491-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/${ns_path}`,
-    'headers': {
-      'Content-Type': 'application/json',
-      'Authorization': AuthorizationHeader
-    }
-  };
-  const invoice_detail = await new Promise((resolve, reject) => {
-    request(ns_invoice_options, function (error, ns_invoice_response) {
-      if (error) { return reject(error); }
-      try {
-        const body = JSON.parse(ns_invoice_response.body)
-        resolve(body)
-      } catch (e) {
-        console.error(e)
-        reject(e)
+  try {
+    // Get Invoice Detail
+    const ns_path = `invoice/${ns_line_item_id}`;
+    const AuthorizationHeader = ns_auth('GET', ns_path);
+    const ns_invoice_options = {
+      'method': 'GET',
+      'url': `https://4147491-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/${ns_path}`,
+      'headers': {
+        'Content-Type': 'application/json',
+        'Authorization': AuthorizationHeader
       }
+    };
+    const invoice_detail = await new Promise((resolve, reject) => {
+      request(ns_invoice_options, function (error, ns_invoice_response) {
+        if (error) { return reject(error); }
+        try {
+          const body = JSON.parse(ns_invoice_response.body)
+          resolve(body)
+        } catch (e) {
+          console.error(e)
+          reject(e)
+        }
+      });
     });
-  });
-  if (!invoice_detail.tranId) {
-    return callback({
+    if (!invoice_detail.tranId) {
+      return callback({
+        outputFields: {
+          invoice_successfully_created: 'no',
+          notification: 'Failed to create the invoice'
+        }
+      })
+    }
+    let get_ns_cust_id = {
+      "method": "PATCH",
+      "hostname": "api.hubapi.com",
+      "port": null,
+      "path": `/crm/v3/objects/line_items/${line_item_id}`,
+      "headers": {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": `Bearer ${accessToken}`
+      }
+    };
+
+    const res = await new Promise((resolve, reject) => {
+      let get_ns_cust_id_req = http.request(get_ns_cust_id, function (get_ns_cust_id_res) {
+        var get_ns_cust_id_chunks = [];
+
+        get_ns_cust_id_res.on("data", function (chunk) {
+          get_ns_cust_id_chunks.push(chunk);
+        });
+
+        get_ns_cust_id_res.on("end", function () {
+          resolve(true)
+        });
+      });
+      get_ns_cust_id_req.write(JSON.stringify({properties:
+        {
+          invoice_successfully_created: 'yes',
+          netsuite_invoice_id: invoice_detail.tranId,
+          invoice_number:invoice_detail.tranId
+        }
+      }));
+      get_ns_cust_id_req.end();
+    })
+    callback({
       outputFields: {
-        notification: 'Failed to create the invoice'
+        invoice_successfully_created: 'yes',
+        notification: 'Invoice has been created'
       }
     })
+  } catch (e) {
+    console.error(e)
+    throw e
   }
-  const res = await new Promise((resolve, reject) => {
-    let get_ns_cust_id_req = http.request(get_ns_cust_id, function (get_ns_cust_id_res) {
-      var get_ns_cust_id_chunks = [];
-
-      get_ns_cust_id_res.on("data", function (chunk) {
-        get_ns_cust_id_chunks.push(chunk);
-      });
-
-      get_ns_cust_id_res.on("end", function () {
-        resolve(true)
-      });
-    });
-    get_ns_cust_id_req.write(JSON.stringify({properties:
-      {
-        netsuite_invoice_id: invoice_detail.tranId,
-        invoice_number:invoice_detail.tranId
-      }
-     }));
-     get_ns_cust_id_req.end();
-  })
-  callback({
-    outputFields: {
-      notification: 'Invoice has been created'
-    }
-  })
 }
