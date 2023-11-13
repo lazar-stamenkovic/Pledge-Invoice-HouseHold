@@ -44,7 +44,52 @@ function mapClass(hubSpotClass) {
   return classMapping[hubSpotClass];
 }
 
+function ns_auth(method,url){
+  /**********Netsuitet***********/
+  const BaseURLEncoded = encodeURIComponent(url);
 
+  const TimeStamp = Math.floor(new Date().getTime() / 1000);
+  const Nonce = Math.floor(Math.random() * (99999999 - 9999999) + 9999999).toString();
+  const ConsumerKey = process.env.CONSUMER_KEY;
+  const ConsumerSecret = process.env.CONSUMER_SECRET;
+  const TokenID = process.env.TOKEN_ID;
+  const TokenSecret = process.env.TOKEN_SECRET;
+
+  // Concatenating and URL Encoding Parameters
+  const ConcatenatedParameters = querystring.stringify({
+    oauth_consumer_key: ConsumerKey,
+    oauth_nonce: Nonce,
+    oauth_signature_method: 'HMAC-SHA256',
+    oauth_timestamp: TimeStamp,
+    oauth_token: TokenID,
+    oauth_version: '1.0',
+  });
+  const ConcatenatedParametersEncoded = encodeURIComponent(ConcatenatedParameters);
+
+  // Prepare Signature
+  const SignatureMessage = `${method}&${BaseURLEncoded}&${ConcatenatedParametersEncoded}`;
+
+  // Creating Signature Key
+  const SignatureKey = `${ConsumerSecret}&${TokenSecret}`;
+
+  // Create Signature
+  const signature = crypto.createHmac('sha256', SignatureKey)
+  .update(SignatureMessage)
+  .digest('base64');
+
+  // URL Encode the Signature
+  const SignatureEncoded = encodeURIComponent(signature);
+
+  // Create Authorization
+  const Realm = '4147491_SB1';
+  const AuthorizationHeader = `OAuth realm="${Realm}",oauth_consumer_key="${ConsumerKey}",oauth_token="${TokenID}",oauth_signature_method="HMAC-SHA256",oauth_timestamp="${TimeStamp}",oauth_nonce="${Nonce}",oauth_version="1.0",oauth_signature="${SignatureEncoded}"`;
+  //console.log(AuthorizationHeader)
+
+  /******************************/
+  /**** END Authentification ****/
+  /******************************/
+  return AuthorizationHeader;
+}
 
 exports.main = async (event, callback) => {
 
@@ -72,61 +117,6 @@ exports.main = async (event, callback) => {
   const billing_state = event.inputFields['billing_state'];
   const billing_zip = event.inputFields['billing_zip'];
 
-
-
-/***** END ******** Variables ***************/
-
-
-
-  /******************************/
-  /****** Authentification ******/
-  /******************************/
-
-
-  /**********Netsuitet***********/
-  const BaseURL = 'https://4147491-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/invoice/';
-  const BaseURLEncoded = encodeURIComponent(BaseURL);
-
-  const TimeStamp = Math.floor(new Date().getTime() / 1000);
-  const Nonce = Math.floor(Math.random() * (99999999 - 9999999) + 9999999).toString();
-  const ConsumerKey = process.env.CONSUMER_KEY;
-  const ConsumerSecret = process.env.CONSUMER_SECRET;
-  const TokenID = process.env.TOKEN_ID;
-  const TokenSecret = process.env.TOKEN_SECRET;
-
-  // Concatenating and URL Encoding Parameters
-  const ConcatenatedParameters = querystring.stringify({
-    oauth_consumer_key: ConsumerKey,
-    oauth_nonce: Nonce,
-    oauth_signature_method: 'HMAC-SHA256',
-    oauth_timestamp: TimeStamp,
-    oauth_token: TokenID,
-    oauth_version: '1.0',
-  });
-  const ConcatenatedParametersEncoded = encodeURIComponent(ConcatenatedParameters);
-
-  // Prepare Signature
-  const SignatureMessage = `POST&${BaseURLEncoded}&${ConcatenatedParametersEncoded}`;
-
-  // Creating Signature Key
-  const SignatureKey = `${ConsumerSecret}&${TokenSecret}`;
-
-  // Create Signature
-  const signature = crypto.createHmac('sha256', SignatureKey)
-  .update(SignatureMessage)
-  .digest('base64');
-
-  // URL Encode the Signature
-  const SignatureEncoded = encodeURIComponent(signature);
-
-  // Create Authorization
-  const Realm = '4147491_SB1';
-  const AuthorizationHeader = `OAuth realm="${Realm}",oauth_consumer_key="${ConsumerKey}",oauth_token="${TokenID}",oauth_signature_method="HMAC-SHA256",oauth_timestamp="${TimeStamp}",oauth_nonce="${Nonce}",oauth_version="1.0",oauth_signature="${SignatureEncoded}"`;
-  //console.log(AuthorizationHeader)
-
-  /******************************/
-  /**** END Authentification ****/
-  /******************************/
   const li_ids = JSON.parse(line_items)
   var options = {
     "method": "POST",
@@ -172,90 +162,100 @@ exports.main = async (event, callback) => {
     if (!line_items_detail || !line_items_detail.length) {
       throw Error("failed to get line item detail")
     }
-    const lineItem = line_items_detail[0];
-    const properties = lineItem.properties
-    if (!properties) {
-      throw Error("missing line item properties")
-    }
-    const li_id = properties.hs_object_id;
-    const li_qty = parseFloat(properties.quantity);
-    const li_name = properties.name;
-    const li_amount = parseFloat(properties.amount);
-    const li_netsuite_item_internal_id = properties.netsuite_item_internal_id;
-    const li_netsuite_internal_id = properties.netsuite_internal_id;
-    const li_netsuite_invoice_id = properties.netsuite_invoice_id;
-    const li_invoice_number = properties.invoice_number;
-    const li_class = properties.class;
-    const li_department = properties.department;
-    const li_status = properties.status;
-    const li_due_date = properties.due_date;
-    const totalPrice = calculateTotalPrice(properties.amount, properties.quantity);
+    const results = []
+    console.log('1111', line_items_detail)
+    for (const lineItem of line_items_detail) {
+      const properties = lineItem.properties
+      if (!properties) {
+        throw Error("missing line item properties")
+      }
+      const li_id = properties.hs_object_id;
+      const li_qty = parseFloat(properties.quantity);
+      const li_amount = parseFloat(properties.amount);
+      const li_netsuite_item_internal_id = properties.netsuite_item_internal_id || '';
+      const li_invoice_number = properties.invoice_number || '';
+      const li_class = properties.class;
+      const li_department = properties.department;
+      const li_due_date = properties.due_date;
+      const totalPrice = calculateTotalPrice(properties.amount, properties.quantity);
 
-    let netSuiteDepartmentId = mapDepartment(li_department);
-    let netSuiteClassId = mapClass(li_class);
+      let netSuiteDepartmentId = mapDepartment(li_department) || '';
+      let netSuiteClassId = mapClass(li_class) || '';
 
-    const create_invoice_options = {
-      method: 'POST',
-      url: 'https://4147491-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/invoice/',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': AuthorizationHeader
-      },
-      data: JSON.stringify({
-        "class": {
-          "id": netSuiteClassId
+      const BaseURL = 'https://4147491-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/invoice';
+      const AuthorizationHeader = ns_auth('POST', BaseURL);
+      const create_invoice_options = {
+        method: 'POST',
+        url: BaseURL,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': AuthorizationHeader
         },
-        "department": {
-          "id": netSuiteDepartmentId
-        },
-        "custbodyem_billto_address1_hubspot": billing_street_address_1,
-        "custbodyem_billto_city_hubspot": billing_city,
-        "custbodyem_billto_state_hubspot": billing_state,
-        "custbodyem_billto_zip_hubspot": billing_zip,
-        "custbodyem_deal_transaction_id": dealId,
-        "custbodyem_item_transaction_id": li_id,
-        "custbodyem_salesrep_hubspot": owner_full_name,
-        "dueDate": li_due_date,
-        "entity": {
-          "id": nsId
-        },
-        "status": {
-          "id": "Paid In Full",
-          "refName": "Paid In Full"
-        },
-        "subsidiary": {
-          "id": "1",
-          "refName": "Parent Company"
-        },
-        "tranId": li_invoice_number,
-        "item": {
-          "items": [
-            {
-              "amount": li_amount * li_qty,
-              "item": {
-                "id":li_netsuite_item_internal_id
-              },
-              "quantity": li_qty
-            }
-          ]
-        },
+        data: JSON.stringify({
+          "class": {
+            "id": netSuiteClassId
+          },
+          "department": {
+            "id": netSuiteDepartmentId
+          },
+          "custbodyem_billto_address1_hubspot": billing_street_address_1,
+          "custbodyem_billto_city_hubspot": billing_city,
+          "custbodyem_billto_state_hubspot": billing_state,
+          "custbodyem_billto_zip_hubspot": billing_zip,
+          "custbodyem_deal_transaction_id": dealId,
+          "custbodyem_item_transaction_id": li_id,
+          "custbodyem_salesrep_hubspot": owner_full_name,
+          "dueDate": li_due_date,
+          "entity": {
+            "id": nsId
+          },
+          "status": {
+            "id": "Paid In Full",
+            "refName": "Paid In Full"
+          },
+          "subsidiary": {
+            "id": "1",
+            "refName": "Parent Company"
+          },
+          "tranId": li_invoice_number || "",
+          "item": {
+            "items": [
+              {
+                "amount": li_amount * li_qty,
+                "item": {
+                  "id":li_netsuite_item_internal_id
+                },
+                "quantity": li_qty
+              }
+            ]
+          },
+        })
+      };
+
+      const ns_lineItemId = await axios(create_invoice_options)
+       .then(response => {
+        try {
+          if (!response.headers.location) {
+            console.error(`cannot find location`);
+            return null;
+          }
+          return extractNSrecordId(response.headers.location);
+        } catch(e) {
+          console.error(e)
+          throw e
+        }
+       })
+      if (!ns_lineItemId) {
+        throw Error(`failed to get ns linvoice id`)
+      }
+      results.push({
+        line_item_id: li_id,
+        ns_line_item_id: ns_lineItemId
       })
-    };
-
-    const ns_lineItemId = await axios(create_invoice_options)
-     .then(response => {
-       if (!response.headers.location) {
-         console.error(`cannot find location`);
-         return null;
-       }
-       return extractNSrecordId(response.headers.location);
-     });
-    if (!ns_lineItemId) {
-      throw Error(`failed to get ns linvoice id`)
     }
+
     const outputFields = {
-      line_item_id: li_id,
-      ns_line_item_id: ns_lineItemId
+      ns_line_item_results: results
     }
     console.log(outputFields)
     callback({ outputFields: outputFields });
