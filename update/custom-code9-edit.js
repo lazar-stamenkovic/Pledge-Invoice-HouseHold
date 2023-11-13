@@ -56,11 +56,10 @@ function ns_auth(method,path){
 
 exports.main = async (event, callback) => {
   const dealId = event.inputFields['hs_object_id'];
-  const line_item_id = event.inputFields['line_item_id'];
-  const ns_line_item_id = event.inputFields['ns_line_item_id'];
-  const accessToken = process.env.accessToken;
+  const ns_line_item_results_string = event.inputFields['ns_line_item_results'];
 
-  if (!ns_line_item_id) {
+  const accessToken = process.env.accessToken;
+  if (!ns_line_item_results_string) {
     return callback({
       outputFields: {
         invoice_successfully_created: 'no',
@@ -69,30 +68,9 @@ exports.main = async (event, callback) => {
     })
   }
   try {
-    // Get Invoice Detail
-    const ns_path = `invoice/${ns_line_item_id}`;
-    const AuthorizationHeader = ns_auth('GET', ns_path);
-    const ns_invoice_options = {
-      'method': 'GET',
-      'url': `https://4147491-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/${ns_path}`,
-      'headers': {
-        'Content-Type': 'application/json',
-        'Authorization': AuthorizationHeader
-      }
-    };
-    const invoice_detail = await new Promise((resolve, reject) => {
-      request(ns_invoice_options, function (error, ns_invoice_response) {
-        if (error) { return reject(error); }
-        try {
-          const body = JSON.parse(ns_invoice_response.body)
-          resolve(body)
-        } catch (e) {
-          console.error(e)
-          reject(e)
-        }
-      });
-    });
-    if (!invoice_detail.tranId) {
+
+    const ns_line_item_results = JSON.parse(ns_line_item_results_string)
+    if (!ns_line_item_results || !ns_line_item_results.length) {
       return callback({
         outputFields: {
           invoice_successfully_created: 'no',
@@ -100,40 +78,76 @@ exports.main = async (event, callback) => {
         }
       })
     }
-    let get_ns_cust_id = {
-      "method": "PATCH",
-      "hostname": "api.hubapi.com",
-      "port": null,
-      "path": `/crm/v3/objects/line_items/${line_item_id}`,
-      "headers": {
-        "accept": "application/json",
-        "content-type": "application/json",
-        "authorization": `Bearer ${accessToken}`
-      }
-    };
 
-    const res = await new Promise((resolve, reject) => {
-      let get_ns_cust_id_req = http.request(get_ns_cust_id, function (get_ns_cust_id_res) {
-        var get_ns_cust_id_chunks = [];
-
-        get_ns_cust_id_res.on("data", function (chunk) {
-          get_ns_cust_id_chunks.push(chunk);
-        });
-
-        get_ns_cust_id_res.on("end", function () {
-          resolve(true)
+    for (const result of ns_line_item_results) {
+      const line_item_id = result.line_item_id;
+      const ns_line_item_id = result.ns_line_item_id;
+      // Get Invoice Detail
+      const ns_path = `invoice/${ns_line_item_id}`;
+      const AuthorizationHeader = ns_auth('GET', ns_path);
+      const ns_invoice_options = {
+        'method': 'GET',
+        'url': `https://4147491-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/${ns_path}`,
+        'headers': {
+          'Content-Type': 'application/json',
+          'Authorization': AuthorizationHeader
+        }
+      };
+      const invoice_detail = await new Promise((resolve, reject) => {
+        request(ns_invoice_options, function (error, ns_invoice_response) {
+          if (error) { return reject(error); }
+          try {
+            const body = JSON.parse(ns_invoice_response.body)
+            resolve(body)
+          } catch (e) {
+            console.error(e)
+            reject(e)
+          }
         });
       });
-      get_ns_cust_id_req.write(JSON.stringify({properties:
-        {
-          invoice_successfully_created: 'yes',
-          netsuite_invoice_id: invoice_detail.tranId,
-          invoice_number:invoice_detail.tranId,
-          netsuite_internal_id: ns_line_item_id
+      if (!invoice_detail.tranId) {
+        return callback({
+          outputFields: {
+            invoice_successfully_created: 'no',
+            notification: 'Failed to create the invoice'
+          }
+        })
+      }
+      let get_ns_cust_id = {
+        "method": "PATCH",
+        "hostname": "api.hubapi.com",
+        "port": null,
+        "path": `/crm/v3/objects/line_items/${line_item_id}`,
+        "headers": {
+          "accept": "application/json",
+          "content-type": "application/json",
+          "authorization": `Bearer ${accessToken}`
         }
-      }));
-      get_ns_cust_id_req.end();
-    })
+      };
+
+      const res = await new Promise((resolve, reject) => {
+        let get_ns_cust_id_req = http.request(get_ns_cust_id, function (get_ns_cust_id_res) {
+          var get_ns_cust_id_chunks = [];
+
+          get_ns_cust_id_res.on("data", function (chunk) {
+            get_ns_cust_id_chunks.push(chunk);
+          });
+
+          get_ns_cust_id_res.on("end", function () {
+            resolve(true)
+          });
+        });
+        get_ns_cust_id_req.write(JSON.stringify({properties:
+          {
+            invoice_successfully_created: 'yes',
+            netsuite_invoice_id: invoice_detail.tranId,
+            invoice_number:invoice_detail.tranId,
+            netsuite_internal_id: ns_line_item_id
+          }
+        }));
+        get_ns_cust_id_req.end();
+      })
+    }
     callback({
       outputFields: {
         invoice_successfully_created: 'yes',
